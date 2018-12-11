@@ -49,8 +49,6 @@ let execute_cmd command =
       report_status command "was stopped by signal number" signal ;
       false
 
-let cd_repo = "cd repo"
-
 let git_fetch ?(force = true) repo remote_ref local_branch_name =
   "git fetch -fu " ^ repo
   ^ (if force then " +" else " ")
@@ -64,12 +62,22 @@ let git_push ?(force = true) repo local_ref remote_branch_name =
 let git_delete repo remote_branch_name =
   git_push ~force:false repo "" remote_branch_name
 
-let git_make_ancestor ~base ref2 =
-  Printf.sprintf "git checkout %s" ref2
-  |&& Printf.sprintf
-        "git merge %s -m \"Bot merge $(git rev-parse %s) into $(git rev-parse \
-         %s)\" || { git merge --abort; false; }"
-        base base ref2
+let f = Printf.sprintf
+
+let git_rev_parse = f "git rev-parse %s"
+
+let ( ~$ ) cmd = "$(" ^ cmd ^ ")"
+
+let git_merge rev1 rev2 newrev =
+  let msg =
+    f "Bot merge %s into %s" ~$(git_rev_parse rev2) ~$(git_rev_parse rev1)
+  in
+  let merge_commit =
+    f "git commit-tree $(git write-tree) -p %s -p %s -m \"%s\"" rev1 rev2 msg
+  in
+  (* Test if merge is possible then do it for real *)
+  f "git read-tree -i -m %s %s" rev1 rev2
+  |&& f "git update-ref %s %s" newrev ~$merge_commit
 
 let extract_commit json =
   let open Yojson.Basic.Util in
@@ -278,10 +286,9 @@ let pull_request_action json =
       let pr_local_base_branch = "remote-" ^ pr_base_branch in
       (fun () ->
         print_endline "Action warrants fetch / push." ;
-        cd_repo
-        |&& git_fetch pr_base_repo_url pr_base_branch pr_local_base_branch
+        git_fetch pr_base_repo_url pr_base_branch pr_local_base_branch
         |&& git_fetch pr_repo pr_branch pr_local_branch
-        |&& git_make_ancestor ~base:pr_local_base_branch pr_local_branch
+        |&& git_merge pr_local_branch pr_local_base_branch pr_local_branch
         |> execute_cmd
         >|= fun ok ->
         if ok then
@@ -296,23 +303,21 @@ let pull_request_action json =
             remove_rebase_label pr_base_repo_name number )
           else return () )
           <&> (* Force push *)
-          ( cd_repo
-          |&& git_push gitlab_repo pr_local_branch pr_local_branch
+          ( git_push gitlab_repo pr_local_branch pr_local_branch
           |> execute_cmd >|= ignore )
         else (
           print_endline "Adding the rebase label and a failed status check." ;
           add_rebase_label pr_base_repo_name number
           <&> send_status_check ~repo_full_name:pr_base_repo_name
                 ~commit:pr_head_commit ~state:"failure" ~url:""
-                ~context:("ci/gitlab/pr-" ^ Int.to_string number)
+                ~context:"GitLab CI pipeline"
                 ~description:
                   "Pipeline did not run on GitLab CI because branch is not \
                    up-to-date." ) )
       |> Lwt.async
   | "closed" ->
       print_endline "Branch will be deleted following PR closing." ;
-      (fun () ->
-        cd_repo |&& git_delete gitlab_repo pr_local_branch |> execute_cmd )
+      (fun () -> git_delete gitlab_repo pr_local_branch |> execute_cmd)
       |> Lwt.async ;
       if json_pr |> member "merged" |> to_bool |> not then (
         print_endline
@@ -322,11 +327,13 @@ let pull_request_action json =
         (* TODO: if PR was merged in master without a milestone, post an alert *) )
   | _ -> ()
 
+(*
 let backport_pr number backport_to =
   "./backport-pr.sh " ^ Int.to_string number ^ " " ^ backport_to
   |&& cd_repo
   |&& git_push (gitlab_repo "coq/coq") "HEAD" ("staging-" ^ backport_to)
   |> execute_cmd
+*)
 
 let project_action json =
   let open Yojson.Basic.Util in
@@ -393,7 +400,7 @@ let push_action json =
             print_string "Backporting to " ;
             print_string backport_to ;
             print_endline " was requested." ;
-            Lwt.async (fun () -> backport_pr pr_number backport_to) ;
+            (* Lwt.async (fun () -> backport_pr pr_number backport_to) ; *)
             add_pr_to_column pr_id request_inclusion_column )
       | None ->
           print_endline "Did not get any backporting info." ;
@@ -618,7 +625,7 @@ let server =
   print_endline "Initializing repository" ;
   "git config --global user.email \"coqbot@users.noreply.github.com\""
   |&& "git config --global user.name \"coqbot\"" |&& "mkdir -p repo"
-  |&& cd_repo |&& "git init" |> execute_cmd |> Lwt.ignore_result ;
+  |&& "git init --bare" |> execute_cmd |> Lwt.ignore_result ;
   let mode = `TCP (`Port port) in
   Server.create ~mode (Server.make ~callback ())
 
