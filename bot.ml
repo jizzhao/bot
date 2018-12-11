@@ -21,6 +21,14 @@ open Cohttp
 open Cohttp_lwt_unix
 open Lwt
 
+let new_rev =
+  let count = ref 0 in
+  let new_rev () =
+    count := !count + 1 ;
+    "branch" ^ Int.to_string !count
+  in
+  new_rev
+
 let gitlab_repo full_name =
   "https://" ^ username ^ ":" ^ password ^ "@gitlab.com/" ^ full_name ^ ".git"
 
@@ -268,7 +276,7 @@ let pull_request_action json =
   and pr_base = json_pr |> member "base" in
   let pr_base_repo = pr_base |> member "repo" in
   let pr_base_repo_name = pr_base_repo |> member "full_name" |> to_string in
-  let pr_local_branch = "pr-" ^ Int.to_string number
+  let pr_gitlab_branch = "pr-" ^ Int.to_string number
   and gitlab_repo = gitlab_repo pr_base_repo_name in
   print_string "Number: #" ;
   print_int number ;
@@ -283,12 +291,14 @@ let pull_request_action json =
       and pr_repo =
         pr_head |> member "repo" |> member "html_url" |> to_string
       in
-      let pr_local_base_branch = "remote-" ^ pr_base_branch in
       (fun () ->
         print_endline "Action warrants fetch / push." ;
-        git_fetch pr_base_repo_url pr_base_branch pr_local_base_branch
-        |&& git_fetch pr_repo pr_branch pr_local_branch
-        |&& git_merge pr_local_branch pr_local_base_branch pr_local_branch
+        let branch_local_copy = new_rev () in
+        let base_local_copy = new_rev () in
+        let merge_rev = new_rev () in
+        git_fetch pr_base_repo_url pr_base_branch base_local_copy
+        |&& git_fetch pr_repo pr_branch branch_local_copy
+        |&& git_merge branch_local_copy base_local_copy merge_rev
         |> execute_cmd
         >|= fun ok ->
         if ok then
@@ -303,7 +313,7 @@ let pull_request_action json =
             remove_rebase_label pr_base_repo_name number )
           else return () )
           <&> (* Force push *)
-          ( git_push gitlab_repo pr_local_branch pr_local_branch
+          ( git_push gitlab_repo merge_rev pr_gitlab_branch
           |> execute_cmd >|= ignore )
         else (
           print_endline "Adding the rebase label and a failed status check." ;
@@ -317,7 +327,7 @@ let pull_request_action json =
       |> Lwt.async
   | "closed" ->
       print_endline "Branch will be deleted following PR closing." ;
-      (fun () -> git_delete gitlab_repo pr_local_branch |> execute_cmd)
+      (fun () -> git_delete gitlab_repo pr_gitlab_branch |> execute_cmd)
       |> Lwt.async ;
       if json_pr |> member "merged" |> to_bool |> not then (
         print_endline
