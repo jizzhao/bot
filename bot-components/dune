@@ -1,7 +1,6 @@
-(library
- (name BotComponents)
- (public_name bot-components)
- (libraries base cohttp-lwt-unix str yojson)
+(executable
+ (name test_bug)
+ (modules test_bug)
  (preprocess (pps ppx_graphql))
  (preprocessor_deps (file schema.json)))
 
