@@ -2,7 +2,7 @@
  (name Bot_components)
  (public_name bot-components)
  (libraries base cohttp-lwt-unix hex nocrypto stdio str yojson)
- (preprocess (pps ppx_graphql))
+ (preprocess (pps graphql_ppx))
  (preprocessor_deps (file schema.json)))
 
 (rule

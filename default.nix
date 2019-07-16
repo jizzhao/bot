@@ -1,36 +1,33 @@
 { pkgs ?
   import (fetchTarball {
-    url = "https://github.com/Zimmi48/nixpkgs/archive/c40636e15dd690d25aec998b260e812e29227818.tar.gz";
-    sha256 = "12cy25cg4mzxqjrmkzqp786pyq2gskl7r2d42vb1ddwq4rcgidq9";
+    url = "https://github.com/NixOS/nixpkgs/archive/31c38894c90429c9554eab1b416e59e3b6e054df.tar.gz";
+    sha256 = "1fv14rj5zslzm14ak4lvwqix94gm18h28376h4hsmrqqpnfqwsdw";
   }) {}
+, ocamlPackages ? pkgs.ocamlPackages
 }:
 
-with pkgs;
-
-stdenv.mkDerivation rec {
-  name = "coqbot";
-  src = null;
+pkgs.mkShell {
   buildInputs = with ocamlPackages;
     [ # Compiler and dev tools
       ocaml
       findlib
       dune
       utop
-      ncurses
       merlin
-      ocamlformat
-      nodePackages.graphql-cli
+      pkgs.ocamlformat
+      pkgs.nodePackages.graphql-cli
       # Libraries
       base
       cohttp
       cohttp-lwt-unix
       hex
       nocrypto
-      ppx_graphql
+      ppxlib
+      ppx_tools_versioned
       yojson
       # Publishing
-      heroku
+      pkgs.heroku
     ];
 
-  shellHook = "export OCAMLFORMAT_LOCATION=${ocamlformat}";
+  shellHook = "export OCAMLFORMAT_LOCATION=${pkgs.ocamlformat}";
 }
